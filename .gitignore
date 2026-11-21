@@ -1,0 +1,8 @@
+.env
+
+# JetBrains IDE
+.idea/
+
+# Xcode user-specific files
+xcuserdata/
+*.xcuserstate

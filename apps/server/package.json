@@ -1,0 +1,30 @@
+{
+  "name": "cloudflare-workers-openapi",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "cf-typegen": "wrangler types",
+    "wrangler": "wrangler",
+    "drizzle-kit": "drizzle-kit"
+  },
+  "dependencies": {
+    "chanfana": "^2.6.3",
+    "dotenv": "^17.0.1",
+    "drizzle-orm": "^0.44.2",
+    "hono": "^4.6.20",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.13.0",
+    "@types/service-worker-mock": "^2.0.4",
+    "drizzle-kit": "^0.31.4",
+    "tsx": "^4.20.3",
+    "wrangler": "^4.23.0"
+  }
+}
