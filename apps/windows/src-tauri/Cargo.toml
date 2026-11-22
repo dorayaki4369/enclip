@@ -1,0 +1,23 @@
+[package]
+name = "enclip-windows"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+enclip-client = { version = "0.1.0", path = "../../../crates/enclip-client" }
+enclip-core = { version = "0.1.0", path = "../../../crates/enclip-core" }
+qrcode = "0.15.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tauri = { version = "2.12.7", features = ["tray-icon", "image-png"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+
+[build-dependencies]
+tauri-build = "2.7.6"
+
+[target."cfg(not(windows))".dependencies]
+arboard = "3.7.0"
+
+[target."cfg(windows)".dependencies]
+clipboard-win = "5.4.3"
+windows = { version = "0.62.2", features = ["Win32_Security_Cryptography", "Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Memory"] }

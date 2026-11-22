@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja">
+	<head>
+		<meta charset="utf-8" />
+		<title>enclip</title>
+		<link rel="stylesheet" href="style.css" />
+	</head>
+	<body>
+		<header>
+			<h1>enclip</h1>
+			<span id="connection" class="badge">接続中…</span>
+		</header>
+
+		<p id="error" class="error" hidden></p>
+
+		<section class="controls">
+			<label class="toggle">
+				<input id="paused" type="checkbox" />
+				一時停止（コピーを送らず、受け取っても反映しない）
+			</label>
+			<button id="add-device" type="button">端末を追加</button>
+		</section>
+
+		<section id="pairing" class="pairing" hidden>
+			<h2>端末を追加</h2>
+			<div id="pairing-scan">
+				<p>iPhone の enclip でこの QR コードを読み取ってください。</p>
+				<div id="qr" class="qr"></div>
+			</div>
+			<div id="pairing-confirm" hidden>
+				<p>iPhone に表示された確認コードが、次のコードと同じか確かめてください。</p>
+				<p id="pairing-code" class="code"></p>
+				<p class="note">iPhone にコードが出ていない場合は承認しないでください。</p>
+				<button id="approve" type="button" class="primary">一致したので承認</button>
+			</div>
+			<p id="pairing-message" class="note"></p>
+			<button id="close-pairing" type="button">閉じる</button>
+		</section>
+
+		<section>
+			<h2>履歴</h2>
+			<p class="note">クリックするとクリップボードへ入れます。</p>
+			<ul id="history" class="history"></ul>
+		</section>
+
+		<script src="main.js"></script>
+	</body>
+</html>
