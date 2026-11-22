@@ -1,0 +1,23 @@
+[package]
+name = "enclip-ffi"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+enclip-core = { version = "0.1.0", path = "../enclip-core" }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+uniffi = "0.32.2"
+
+[lib]
+crate-type = ["staticlib", "lib"]
+name = "enclip_ffi"
+
+[features]
+# Swift のバインディング生成にだけ使う。アプリに組み込むライブラリには含めない。
+bindgen = ["uniffi/cli"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+required-features = ["bindgen"]

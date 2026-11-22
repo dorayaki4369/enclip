@@ -6,3 +6,15 @@
 # Xcode user-specific files
 xcuserdata/
 *.xcuserstate
+
+# Rust
+target/
+
+# iOS の生成物（scripts/setup-ios.sh で作る）
+apps/ios/EnClip.xcodeproj/
+apps/ios/Frameworks/
+apps/ios/Shared/Generated/
+apps/ios/App/Info.plist
+apps/ios/Keyboard/Info.plist
+apps/ios/App/EnClip.entitlements
+apps/ios/Keyboard/EnClipKeyboard.entitlements
