@@ -1,0 +1,79 @@
+# XcodeGen の設定。プロジェクトは `nix shell nixpkgs#xcodegen -c xcodegen generate` で生成する。
+name: EnClip
+options:
+  bundleIdPrefix: net.dryk
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    DEVELOPMENT_TEAM: Q5835CBRS6
+    SWIFT_VERSION: "6.0"
+    # 中継サーバーの URL。実機で使うときはデプロイ先の URL に変える。
+    ENCLIP_SERVER_URL: "https://enclip-server.dorayaki4369.workers.dev"
+targets:
+  EnClip:
+    type: application
+    platform: iOS
+    sources:
+      - App
+      - Shared
+    dependencies:
+      - framework: Frameworks/EnclipCore.xcframework
+        embed: false
+      - target: EnClipKeyboard
+    entitlements:
+      path: App/EnClip.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.net.dryk.enclip
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)group.net.dryk.enclip
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: enclip
+        UILaunchScreen: {}
+        NSCameraUsageDescription: Windows に表示された QR コードを読み取るために使います。
+        EnclipServerURL: $(ENCLIP_SERVER_URL)
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.dryk.enclip
+        GENERATE_INFOPLIST_FILE: NO
+  EnClipKeyboard:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Keyboard
+      - Shared
+    dependencies:
+      - framework: Frameworks/EnclipCore.xcframework
+        embed: false
+    entitlements:
+      path: Keyboard/EnClipKeyboard.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.net.dryk.enclip
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)group.net.dryk.enclip
+    info:
+      path: Keyboard/Info.plist
+      properties:
+        CFBundleDisplayName: enclip
+        EnclipServerURL: $(ENCLIP_SERVER_URL)
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: false
+            PrefersRightToLeft: false
+            PrimaryLanguage: ja-JP
+            RequestsOpenAccess: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.dryk.enclip.keyboard
+        GENERATE_INFOPLIST_FILE: NO
