@@ -15,6 +15,9 @@ const OPEN_ATTEMPTS: usize = 10;
 pub struct Clipboard {
     /// 最後に確認したクリップボードの連番。
     last_seq: Option<NonZeroU32>,
+    /// 最後に読んだか書いたテキスト。1 回のコピーで連番が何度も進むアプリがあるので、
+    /// 連番だけでなく中身でも同じコピーかを判定する。
+    last_text: Option<String>,
     history_format: Option<NonZeroU32>,
     cloud_format: Option<NonZeroU32>,
 }
@@ -23,6 +26,7 @@ impl Clipboard {
     pub fn new() -> Self {
         Self {
             last_seq: raw::seq_num(),
+            last_text: read_text(),
             // 受け取った内容を、クリップボード履歴とクラウドクリップボードに残さないための形式。
             history_format: raw::register_format("CanIncludeInClipboardHistory"),
             cloud_format: raw::register_format("CanUploadToCloudClipboard"),
@@ -36,10 +40,12 @@ impl Clipboard {
             return None;
         }
         self.last_seq = seq;
-        let _clipboard = OpenClipboard::new_attempts(OPEN_ATTEMPTS).ok()?;
-        let mut bytes = Vec::new();
-        raw::get_string(&mut bytes).ok()?;
-        String::from_utf8(bytes).ok()
+        let text = read_text()?;
+        if self.last_text.as_deref() == Some(text.as_str()) {
+            return None;
+        }
+        self.last_text = Some(text.clone());
+        Some(text)
     }
 
     /// 受け取ったテキストをクリップボードへ書く。
@@ -58,8 +64,17 @@ impl Clipboard {
         }
         // 自分の書き込みを、次の確認で利用者のコピーとして扱わない。
         self.last_seq = raw::seq_num();
+        self.last_text = Some(text.to_owned());
         Ok(())
     }
+}
+
+/// クリップボードのテキストを読む。テキストがないか、開けなければ None。
+fn read_text() -> Option<String> {
+    let _clipboard = OpenClipboard::new_attempts(OPEN_ATTEMPTS).ok()?;
+    let mut bytes = Vec::new();
+    raw::get_string(&mut bytes).ok()?;
+    String::from_utf8(bytes).ok()
 }
 
 /// 現在の Windows ユーザーだけが復号できる形に暗号化する（DPAPI）。
