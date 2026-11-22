@@ -1,19 +1,24 @@
-import { fromHono } from "chanfana";
+/**
+ * enclip の中継サーバーの入口。
+ * `/groups/:gid/...` をグループ ID ごとの Durable Object へ渡す。
+ */
 import { Hono } from "hono";
-import { ClipboardItemCreate } from "./endpoints/itemCreate";
-import { ClipboardItemList } from "./endpoints/itemList";
+import { groupIdSchema } from "./schemas";
 
-// Start a Hono app
+export { GroupObject } from "./group-object";
+
 const app = new Hono<{ Bindings: Env }>();
-app.get("/healthcheck", (c) => new Response(null, { status: 204 }));
 
-// Setup OpenAPI registry
-const openapi = fromHono(app, {
-	docs_url: "/",
-});
+app.get("/healthcheck", (c) => c.body(null, 204));
 
-// Register OpenAPI endpoints
-openapi.post("/api/items", ClipboardItemCreate);
-openapi.get("/api/items", ClipboardItemList);
+app.all("/groups/:gid/*", (c) => forwardToGroup(c.env, c.req.param("gid"), c.req.raw));
+app.all("/groups/:gid", (c) => forwardToGroup(c.env, c.req.param("gid"), c.req.raw));
+
+function forwardToGroup(env: Env, gid: string, request: Request): Promise<Response> | Response {
+	if (!groupIdSchema.safeParse(gid).success) {
+		return Response.json({ error: "invalid group id" }, { status: 400 });
+	}
+	return env.GROUPS.getByName(gid).fetch(request);
+}
 
 export default app;

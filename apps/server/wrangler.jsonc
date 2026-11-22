@@ -1,55 +1,28 @@
 /**
- * For more details on how to configure Wrangler, refer to:
- * https://developers.cloudflare.com/workers/wrangler/configuration/
+ * enclip の中継サーバー。
+ * グループごとの Durable Object が暗号文の保存と配信、ペアリング中のメッセージ受け渡しを持つ。
+ * サーバーは内容を読めない（docs/crypto/key-protocol.md）。
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "server",
+	"name": "enclip-server",
 	"main": "src/index.ts",
-	"compatibility_date": "2025-07-05",
+	"compatibility_date": "2026-11-01",
 	"observability": {
 		"enabled": true
 	},
-	/**
-	 * Smart Placement
-	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
-	 */
-	"placement": { "mode": "smart" },
-
-	/**
-	 * Bindings
-	 * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
-	 * databases, object storage, AI inference, real-time communication and more.
-	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/
-	 */
-	"d1_databases": [
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "GROUPS",
+				"class_name": "GroupObject"
+			}
+		]
+	},
+	"migrations": [
 		{
-			"binding": "DB",
-			"database_name": "enclip-db",
-			"database_id": "a3867e7d-5c97-4dd2-9cb9-7e983d68c43f"
+			"tag": "v1",
+			"new_sqlite_classes": ["GroupObject"]
 		}
 	]
-
-	/**
-	 * Environment Variables
-	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
-	 */
-	// "vars": { "MY_VARIABLE": "production_value" },
-
-	/**
-	 * Note: Use secrets to store sensitive data.
-	 * https://developers.cloudflare.com/workers/configuration/secrets/
-	 */
-
-	/**
-	 * Static Assets
-	 * https://developers.cloudflare.com/workers/static-assets/binding/
-	 */
-	// "assets": { "directory": "./public/", "binding": "ASSETS" },
-
-	/**
-	 * Service Bindings (communicate between multiple Workers)
-	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
-	 */
-	// "services": [{ "binding": "MY_SERVICE", "service": "my-service" }]
 }
