@@ -233,6 +233,45 @@ fn expired_item_is_rejected() {
     );
 }
 
+/// 履歴の読み込みは受け入れ済みのアイテムも読めるが、受け入れの記録は変えない。
+#[test]
+fn history_reads_accepted_items_without_recording() {
+    let paired = pair();
+    let seen = seal_item(&paired.inviter_group, &payload("seen", 1_000)).unwrap();
+    let fresh = seal_item(&paired.inviter_group, &payload("fresh", 1_000)).unwrap();
+    let mut state = ReceiveState::default();
+    state.accept(&paired.joiner_group, &seen, 2_000).unwrap();
+
+    let read = state
+        .read_for_history(&paired.joiner_group, &seen, 2_000)
+        .unwrap();
+    assert_eq!(read.payload.text, "seen");
+    state
+        .read_for_history(&paired.joiner_group, &fresh, 2_000)
+        .unwrap();
+    // 読んだだけのアイテムは、新着として受け入れられる。
+    assert!(state.accept(&paired.joiner_group, &fresh, 2_000).is_ok());
+}
+
+#[test]
+fn history_skips_expired_and_foreign_items() {
+    let paired = pair();
+    let other = pair();
+    let envelope = seal_item(&paired.inviter_group, &payload("late", 1_000)).unwrap();
+    let state = ReceiveState::default();
+    assert_eq!(
+        state
+            .read_for_history(&paired.joiner_group, &envelope, 1_000 + HOUR_MS)
+            .map(|_| ()),
+        Err(CoreError::Expired)
+    );
+    assert!(
+        state
+            .read_for_history(&other.joiner_group, &envelope, 2_000)
+            .is_err()
+    );
+}
+
 /// `item_secrecy` と関連データの結び付けに対応する。
 #[test]
 fn item_bound_to_group_and_id() {

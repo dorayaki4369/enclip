@@ -8,6 +8,7 @@
 //! enclip-dev <state.json> <server-url> join <qr>       # QR の文字列で参加する
 //! enclip-dev <state.json> <server-url> send <text>     # テキストを送る
 //! enclip-dev <state.json> <server-url> fetch           # 新しいアイテムを取得する
+//! enclip-dev <state.json> <server-url> history         # サーバーにある期限内のアイテムを表示する
 //! enclip-dev <state.json> <server-url> watch           # 配信を待ち受けて表示する
 //! ```
 
@@ -17,8 +18,8 @@ use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use enclip_client::{
-    DeviceState, GroupAuth, GroupState, InviteSession, JoinSession, ServerClient, Url, fetch_new,
-    send_text,
+    DeviceState, GroupAuth, GroupState, InviteSession, JoinSession, ServerClient, Url,
+    fetch_history, fetch_new, send_text,
 };
 use enclip_core::GroupSecrets;
 
@@ -50,6 +51,7 @@ async fn run(args: &[String]) -> CliResult<()> {
         ("join", [qr]) => join(&state_path, &client, qr).await,
         ("send", [text]) => send(&state_path, &client, text).await,
         ("fetch", []) => fetch(&state_path, &client).await,
+        ("history", []) => history(&state_path, &client).await,
         ("watch", []) => watch(&state_path, &client).await,
         _ => Err(format!("unknown command: {command}")),
     }
@@ -137,6 +139,21 @@ async fn fetch(path: &Path, client: &ServerClient) -> CliResult<()> {
     for item in received {
         println!(
             "received seq={} self={} text={}",
+            item.seq, item.from_self, item.payload.text
+        );
+    }
+    Ok(())
+}
+
+async fn history(path: &Path, client: &ServerClient) -> CliResult<()> {
+    let state = load(path)?;
+    let me = state.device_key().map_err(|e| e.to_string())?.public();
+    let items = fetch_history(client, group(&state)?, &me, now_ms())
+        .await
+        .map_err(|e| e.to_string())?;
+    for item in items {
+        println!(
+            "history seq={} self={} text={}",
             item.seq, item.from_self, item.payload.text
         );
     }

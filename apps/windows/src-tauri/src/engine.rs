@@ -7,9 +7,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use enclip_client::{
-    DeviceState, GroupAuth, GroupState, InviteSession, Received, ServerClient, fetch_new, send_text,
+    DeviceState, GroupAuth, GroupState, InviteSession, Received, ServerClient, fetch_history,
+    fetch_new, send_text,
 };
-use enclip_core::GroupSecrets;
+use enclip_core::{GroupSecrets, ItemId};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{Mutex, Notify};
@@ -25,10 +26,25 @@ const RECONNECT_MAX: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Serialize)]
 pub struct HistoryEntry {
+    /// 同じアイテムを履歴に二度入れないための識別子。
+    #[serde(skip)]
+    pub id: ItemId,
     pub text: String,
     pub from_self: bool,
     pub created_ms: u64,
     pub expires_ms: u64,
+}
+
+impl From<&Received> for HistoryEntry {
+    fn from(item: &Received) -> Self {
+        Self {
+            id: item.id,
+            text: item.payload.text.clone(),
+            from_self: item.from_self,
+            created_ms: item.payload.created_ms,
+            expires_ms: item.payload.expires_ms,
+        }
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -219,6 +235,8 @@ impl Engine {
         self.notify_changed();
         self.flush_pending().await;
         self.fetch_and_apply().await?;
+        // 履歴は全端末で共有する一覧なので、つながるたびにサーバーにある分から作り直す。
+        self.reload_history().await?;
         while let Some(message) = socket.next().await {
             message.map_err(|e| e.to_string())?;
             self.fetch_and_apply().await?;
@@ -244,15 +262,10 @@ impl Engine {
         let to_apply = item_to_apply(&received, inner.clipboard_as_of_ms, inner.paused)
             .map(|item| (item.payload.text.clone(), item.payload.created_ms));
         for item in &received {
-            inner.history.insert(
-                0,
-                HistoryEntry {
-                    text: item.payload.text.clone(),
-                    from_self: item.from_self,
-                    created_ms: item.payload.created_ms,
-                    expires_ms: item.payload.expires_ms,
-                },
-            );
+            // 作り直した履歴にすでに入っているものは足さない。
+            if !inner.history.iter().any(|entry| entry.id == item.id) {
+                inner.history.insert(0, HistoryEntry::from(item));
+            }
         }
         let now = now_ms();
         inner.history = visible_history(&inner.history, now);
@@ -260,6 +273,26 @@ impl Engine {
             inner.clipboard_as_of_ms = created_ms;
             self.clipboard.write(text);
         }
+        drop(inner);
+        self.notify_changed();
+        Ok(())
+    }
+
+    /// サーバーにある期限内のアイテムから履歴を作り直す。
+    async fn reload_history(&self) -> Result<(), String> {
+        let mut inner = self.inner.lock().await;
+        let me = inner
+            .state
+            .device_key()
+            .map_err(|e| e.to_string())?
+            .public();
+        let group = inner.state.group.as_ref().ok_or("グループがありません")?;
+        let now = now_ms();
+        let items = fetch_history(&self.client, group, &me, now)
+            .await
+            .map_err(|e| e.to_string())?;
+        let entries: Vec<HistoryEntry> = items.iter().map(HistoryEntry::from).collect();
+        inner.history = visible_history(&entries, now);
         drop(inner);
         self.notify_changed();
         Ok(())
@@ -433,6 +466,7 @@ mod tests {
     #[test]
     fn history_is_ordered_by_creation_and_drops_expired() {
         let entry = |text: &str, created_ms: u64, expires_ms: u64| HistoryEntry {
+            id: ItemId([created_ms as u8; 16]),
             text: text.to_owned(),
             from_self: false,
             created_ms,

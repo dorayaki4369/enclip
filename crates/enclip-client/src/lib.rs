@@ -11,5 +11,5 @@ mod sync;
 pub use api::{ApiError, GroupAuth, ServerClient};
 pub use pairing::{InviteSession, JoinSession, PairingError};
 pub use state::{DeviceState, GroupState};
-pub use sync::{ItemStream, Received, SyncError, fetch_new, send_text};
+pub use sync::{ItemStream, Received, SyncError, fetch_history, fetch_new, send_text};
 pub use url::Url;

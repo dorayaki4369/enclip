@@ -3,6 +3,8 @@
 //! 受信はサーバーの連番で取りこぼしなく進める。WebSocket の通知は「新しいものがある」合図として使い、
 //! 中身は `fetch_new` で連番順に取り直す。
 
+use std::collections::HashSet;
+
 use enclip_core::{CoreError, DevicePublic, GroupSecrets, ItemId, ItemPayload, seal_item};
 use thiserror::Error;
 
@@ -49,6 +51,44 @@ pub async fn send_text(
     Ok(client
         .post_item(&GroupAuth::from_secrets(group), &envelope)
         .await?)
+}
+
+/// 履歴を作るため、サーバーにある期限内のアイテムをすべて取って復号する。
+/// 受け入れの記録と取得済みの連番は変えない。検証に失敗したもの、期限切れ、
+/// 同じアイテム ID の 2 件目以降（サーバーによる再送）は除く。
+pub async fn fetch_history(
+    client: &ServerClient,
+    state: &GroupState,
+    me: &DevicePublic,
+    now_ms: u64,
+) -> Result<Vec<Received>, SyncError> {
+    let secrets = state.secrets()?;
+    let auth = GroupAuth::from_secrets(&secrets);
+    let my_id = me.device_id();
+    let mut items = Vec::new();
+    let mut seen = HashSet::new();
+    let mut after = 0;
+    loop {
+        let page = client.items_after(&auth, after).await?;
+        if page.is_empty() {
+            return Ok(items);
+        }
+        for item in page {
+            after = after.max(item.seq);
+            if let Ok(read) = state
+                .receive
+                .read_for_history(&secrets, &item.envelope, now_ms)
+                && seen.insert(read.id)
+            {
+                items.push(Received {
+                    seq: item.seq,
+                    id: read.id,
+                    from_self: read.payload.sender == my_id,
+                    payload: read.payload,
+                });
+            }
+        }
+    }
 }
 
 /// 取得済みの連番より後のアイテムをすべて取り、受け入れたものを返す。

@@ -47,6 +47,26 @@ impl ReceiveState {
         self.accepted.retain(|_, expires_ms| now < *expires_ms);
     }
 
+    /// 履歴に表示するため、アイテムを復号して期限内かを確かめる。受け入れの記録は変えない。
+    ///
+    /// 履歴は全端末で共有する一覧で、サーバーにある期限内のアイテムから作り直す。
+    /// 新着として扱うか（自動反映など）は `accept` で判定する。
+    pub fn read_for_history(
+        &self,
+        group: &GroupSecrets,
+        envelope: &ItemEnvelope,
+        clock_ms: u64,
+    ) -> Result<Accepted, CoreError> {
+        let payload = open_item(group, envelope)?;
+        if self.effective_now(clock_ms) >= payload.expires_ms {
+            return Err(CoreError::Expired);
+        }
+        Ok(Accepted {
+            id: envelope.id,
+            payload,
+        })
+    }
+
     /// アイテムを復号し、期限内で未受信なら受け入れて記録する。
     pub fn accept(
         &mut self,
