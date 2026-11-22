@@ -73,6 +73,15 @@ struct ServerAPI: Sendable {
         }
     }
 
+    /// 新着の合図を受ける WebSocket を開く。
+    func openItemSignals(group: GroupRecord) -> ItemSignalSocket {
+        var request = makeRequest("GET", groupId: group.groupId, path: "/ws", token: group.accessToken, body: nil)
+        var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+        components.scheme = components.scheme == "https" ? "wss" : "ws"
+        request.url = components.url
+        return ItemSignalSocket(request: request)
+    }
+
     // MARK: 共通
 
     private func makeRequest(_ method: String, groupId: Data, path: String, token: Data?, body: Data?) -> URLRequest {

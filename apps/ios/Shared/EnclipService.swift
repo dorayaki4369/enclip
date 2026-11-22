@@ -59,6 +59,12 @@ struct EnclipService: Sendable {
         try await api.postItem(group: group, envelopeJson: envelope)
     }
 
+    /// 新着の合図を受ける WebSocket を開く。ペアリング前は nil。
+    func openItemSignals() throws -> ItemSignalSocket? {
+        guard let group = try SecretStore.group() else { return nil }
+        return api.openItemSignals(group: group)
+    }
+
     /// 新しいアイテムを取得して履歴に入れ、受け入れたものを返す。
     @discardableResult
     func sync() async throws -> [HistoryItem] {

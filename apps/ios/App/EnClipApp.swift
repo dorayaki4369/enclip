@@ -9,9 +9,12 @@ struct EnClipApp: App {
         WindowGroup {
             ContentView(model: model)
                 .task { await model.startFromLaunchArguments() }
-                .onChange(of: scenePhase) { _, phase in
+                .onChange(of: scenePhase, initial: true) { _, phase in
+                    // 前面にある間だけ接続し、新着を自動で取る。接続時に取り残しも取る。
                     if phase == .active {
-                        Task { await model.refresh() }
+                        model.startLive()
+                    } else {
+                        model.stopLive()
                     }
                 }
         }
