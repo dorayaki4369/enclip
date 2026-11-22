@@ -1,0 +1,263 @@
+/*
+ * enclip 鍵プロトコルの形式モデル（Tamarin prover）
+ *
+ * 仕様の正本: docs/crypto/key-protocol.md
+ * 実行方法: docs/crypto/key-protocol.md の「形式検証」節を参照
+ *
+ * 攻撃者: Dolev-Yao。サーバーと通信路は攻撃者が完全に握る。
+ *   すべての Out は攻撃者に届き、すべての In は攻撃者が作れる値を受け取る。
+ * 端末外のチャネル:
+ *   - QR コード: 既存端末の画面 → 新端末のカメラ。秘匿かつ真正だが、QR_Leak で漏れうる。
+ *   - 確認コード: 新端末の画面に出た確認コードを、人が既存端末の画面の確認コードと見比べる。
+ *     画面の表示は攻撃者も見られるが、新端末の画面の表示は変えられない。
+ *     確認コードは 6 桁なので、違う値から作ったコードが偶然一致することがある。
+ *     この偶然の一致は Pair_Approve_Collision で表し、Guess で印を付ける（1 回あたり 100 万分の 1）。
+ *
+ * 切り替えフラグ:
+ *   APPROVAL : 既存端末で確認コードを照合して承認する（推奨案）。無効なら QR を読んだ端末を自動で受け入れる。
+ *   WEAKSIG  : APPROVAL のとき、承認用ノンスの署名がノンスだけを覆い、ペアリング ID と新端末の公開鍵を含まない。
+ *   DEDUP    : 受信側が同じアイテム ID を二度受け入れない。
+ *
+ * 抽象化（仕様 6.1 に理由を記載）:
+ *   端末の追加と送受信では、端末はグループ作成時の本物のユーザー鍵（!Group）を使うものとして扱う。
+ *   参加した端末が受け取った鍵は Paired に記録し、joined_key_is_genuine で本物と一致することを示す。
+ *   最初の端末は本物の鍵を持ち、本物の鍵を持つ端末が追加した端末も本物の鍵だけを受け取るので、
+ *   参加の順に帰納すると、すべての端末が本物の鍵を持つ。よってこの扱いは実際の手順と同じ実行を表す。
+ *   受け取った鍵をそのまま次の送受信や追加に使うモデルは、端末の連鎖をたどる探索が終わらないため採らない。
+ *   同じ理由で、端末を追加する側はグループの端末に限らず、端末鍵を持つ任意の端末とする。
+ *   正規の端末にできることを増やす方向の近似なので、安全性の補題が成り立てば実際の手順でも成り立つ。
+ *   乱数で作る値（~ 付き）は、探索が任意の値を想定して終わらなくなるのを防ぐため、型として明示している。
+ */
+
+theory enclip
+begin
+
+builtins: asymmetric-encryption, signing, symmetric-encryption
+
+functions: mac/2, sas/3
+
+restriction Eq:
+  "All x y #i. Eq(x, y) @ #i ==> x = y"
+
+restriction Neq:
+  "All x y #i. Neq(x, y) @ #i ==> not (x = y)"
+
+#ifdef DEDUP
+// 受信側は受け入れたアイテム ID を記録し、同じ ID を二度受け入れない（仕様 4.3）。
+restriction accept_once:
+  "All R g id m1 m2 #i #j. Accepted(R, g, id, m1) @ #i & Accepted(R, g, id, m2) @ #j ==> #i = #j"
+#endif
+
+/* ---------- 1. グループの作成（仕様 3） ---------- */
+
+// 各端末は端末鍵を作り、端末の外に出さない。
+rule Device_Key:
+  [ Fr(~did), Fr(~sk) ]
+--[ DevSk(~did, ~sk) ]->
+  [ !Key(~did, ~sk), Out(pk(~sk)) ]
+
+// 最初の端末がユーザー鍵を作り、グループを作る。
+rule Create_Group:
+  [ !Key(D, ~sk), Fr(~gid), Fr(~uk) ]
+--[ GroupCreated(~gid, ~uk) ]->
+  [ !Group(~gid, ~uk), !Member(D, ~gid, ~sk) ]
+
+/* ---------- 2. QR コードによる端末の追加（仕様 4.1） ---------- */
+
+// 既存端末がペアリングを始め、QR コードを表示する。
+rule Pair_Start:
+  [ !Key(A, ~skA), !Group(~gid, ~uk), Fr(~sid), Fr(~ps) ]
+--[ PairStart(A, ~sid) ]->
+  [ PairInit(A, ~gid, ~skA, ~uk, ~sid, ~ps), !QR(~sid, ~ps, pk(~skA), ~gid) ]
+
+// QR コードを盗み見られる（撮影、画面共有、肩越しなど）。
+rule QR_Leak:
+  [ !QR(sid, ps, pkA, gid) ]
+--[ LeakQR(sid) ]->
+  [ Out(<sid, ps, pkA, gid>) ]
+
+// 新端末が QR コードを読み、自分の端末鍵で参加を申請する。
+rule Join_Request:
+  [ !QR(~sid, ~ps, pkA, ~gid), !Key(~did, ~skB) ]
+--[ JoinReq(~did, ~sid, pk(~skB)) ]->
+  [ JoinWait(~did, ~sid, ~ps, pkA, ~gid, ~skB)
+  , Out(<'join', ~sid, pk(~skB), mac(~ps, <'join', ~sid, pk(~skB)>)>)
+  ]
+
+// 確認コードの手順（承認なしの変種では、これらの規則は承認に使われない）。
+// 既存端末が参加申請の MAC を検証し、承認用ノンスを作って署名付きで新端末へ送る（仕様 4.1 の 4）。
+// PairInit は線形の事実なので、1 つの QR コードで扱う参加申請は 1 件だけ。
+#ifdef WEAKSIG
+rule Pair_Challenge:
+  [ PairInit(A, ~gid, ~skA, ~uk, ~sid, ~ps)
+  , In(<'join', ~sid, pkX, mac(~ps, <'join', ~sid, pkX>)>)
+  , Fr(~n)
+  ]
+--[ Challenged(A, ~sid, pkX, ~n) ]->
+  [ PairPending(A, ~gid, ~skA, ~uk, ~sid, ~ps, pkX, ~n)
+  , Out(<'challenge', ~sid, ~n, sign(<'challenge', ~n>, ~skA)>)
+  ]
+#else
+rule Pair_Challenge:
+  [ PairInit(A, ~gid, ~skA, ~uk, ~sid, ~ps)
+  , In(<'join', ~sid, pkX, mac(~ps, <'join', ~sid, pkX>)>)
+  , Fr(~n)
+  ]
+--[ Challenged(A, ~sid, pkX, ~n) ]->
+  [ PairPending(A, ~gid, ~skA, ~uk, ~sid, ~ps, pkX, ~n)
+  , Out(<'challenge', ~sid, ~n, sign(<'challenge', ~sid, pkX, ~n>, ~skA)>)
+  ]
+#endif
+
+// 新端末が既存端末の署名を検証し、確認コードを画面に表示する（仕様 4.1 の 5）。
+// 表示は 1 回だけ（JoinWait を消費する）。表示されたコードは攻撃者も見られる。
+#ifdef WEAKSIG
+rule Join_Show_Code:
+  [ JoinWait(did, ~sid, ~ps, pkA, ~gid, ~skB)
+  , In(<'challenge', ~sid, n, sig>)
+  ]
+--[ Eq(verify(sig, <'challenge', n>, pkA), true)
+  , CodeShown(did, ~sid, sas(~ps, pk(~skB), n))
+  ]->
+  [ JoinShown(did, ~sid, pkA, ~gid, ~skB)
+  , !Display(~sid, sas(~ps, pk(~skB), n))
+  , Out(sas(~ps, pk(~skB), n))
+  ]
+#else
+rule Join_Show_Code:
+  [ JoinWait(did, ~sid, ~ps, pkA, ~gid, ~skB)
+  , In(<'challenge', ~sid, n, sig>)
+  ]
+--[ Eq(verify(sig, <'challenge', ~sid, pk(~skB), n>, pkA), true)
+  , CodeShown(did, ~sid, sas(~ps, pk(~skB), n))
+  ]->
+  [ JoinShown(did, ~sid, pkA, ~gid, ~skB)
+  , !Display(~sid, sas(~ps, pk(~skB), n))
+  , Out(sas(~ps, pk(~skB), n))
+  ]
+#endif
+
+#ifdef APPROVAL
+
+// 利用者が両画面の確認コードの一致を確かめ、既存端末で承認する（仕様 4.1 の 6、7）。
+rule Pair_Approve:
+  let wrap = aenc(<'uk', ~sid, ~gid, ~uk>, pkX)
+  in
+  [ PairPending(A, ~gid, ~skA, ~uk, ~sid, ~ps, pkX, ~n)
+  , !Display(~sid, sas(~ps, pkX, ~n))
+  ]
+--[ Approved(A, ~sid, pkX) ]->
+  [ Out(<'welcome', ~sid, wrap, sign(<'welcome', ~sid, pkX, wrap>, ~skA)>) ]
+
+// 違う値から作った 6 桁のコードが偶然一致し、利用者が承認してしまう場合。
+// 1 回の照合あたり 100 万分の 1 で起きる事象として、Guess で印を付ける。
+rule Pair_Approve_Collision:
+  let wrap = aenc(<'uk', ~sid, ~gid, ~uk>, pkX)
+  in
+  [ PairPending(A, ~gid, ~skA, ~uk, ~sid, ~ps, pkX, ~n)
+  , !Display(~sid, c)
+  ]
+--[ Approved(A, ~sid, pkX), Guess(~sid), Neq(c, sas(~ps, pkX, ~n)) ]->
+  [ Out(<'welcome', ~sid, wrap, sign(<'welcome', ~sid, pkX, wrap>, ~skA)>) ]
+
+// 新端末が、QR コードで得た既存端末の公開鍵で署名を検証し、ユーザー鍵を取り出す。
+// 受け取った鍵は検証の対象なので、本物かどうかを仮定せず Paired に記録する。
+rule Join_Complete:
+  let wrap = aenc(<'uk', ~sid, ~gid, uk>, pk(~skB))
+  in
+  [ JoinShown(did, ~sid, pkA, ~gid, ~skB)
+  , In(<'welcome', ~sid, wrap, sig>)
+  ]
+--[ Paired(did, ~sid, ~gid, uk)
+  , Eq(verify(sig, <'welcome', ~sid, pk(~skB), wrap>, pkA), true)
+  ]->
+  [ !Member(did, ~gid, ~skB) ]
+#else
+// 承認なし: 既存端末は MAC が正しい参加申請をそのまま受け入れる。
+rule Pair_Approve:
+  let wrap = aenc(<'uk', ~sid, ~gid, ~uk>, pkX)
+  in
+  [ PairInit(A, ~gid, ~skA, ~uk, ~sid, ~ps)
+  , In(<'join', ~sid, pkX, mac(~ps, <'join', ~sid, pkX>)>)
+  ]
+--[ Approved(A, ~sid, pkX) ]->
+  [ Out(<'welcome', ~sid, wrap, sign(<'welcome', ~sid, pkX, wrap>, ~skA)>) ]
+
+rule Join_Complete:
+  let wrap = aenc(<'uk', ~sid, ~gid, uk>, pk(~skB))
+  in
+  [ JoinWait(did, ~sid, ~ps, pkA, ~gid, ~skB)
+  , In(<'welcome', ~sid, wrap, sig>)
+  ]
+--[ Paired(did, ~sid, ~gid, uk)
+  , Eq(verify(sig, <'welcome', ~sid, pk(~skB), wrap>, pkA), true)
+  ]->
+  [ !Member(did, ~gid, ~skB) ]
+#endif
+
+/* ---------- 3. アイテムの送受信（仕様 4.2、4.3） ---------- */
+
+// 1 件ごとにアイテム鍵を作り、本文をアイテム鍵で、アイテム鍵をユーザー鍵で暗号化する。
+// どちらも AEAD の関連データとして gid と id を結び付ける（タプルに含めて表す）。
+rule Send_Item:
+  [ !Member(D, ~gid, ~sk), !Group(~gid, ~uk), Fr(~id), Fr(~ik), Fr(~m) ]
+--[ Sent(D, ~gid, ~id, ~m), ItemKey(~gid, ~id, ~ik) ]->
+  [ Out(<'item', ~gid, ~id, senc(<'body', ~gid, ~id, ~m>, ~ik), senc(<'ik', ~gid, ~id, ~ik>, ~uk)>) ]
+
+rule Receive_Item:
+  [ !Member(R, ~gid, ~sk), !Group(~gid, ~uk)
+  , In(<'item', ~gid, id, senc(<'body', ~gid, id, m>, ik), senc(<'ik', ~gid, id, ik>, ~uk)>)
+  ]
+--[ Accepted(R, ~gid, id, m) ]->
+  [ ]
+
+/* ---------- 性質 ---------- */
+
+// 補助: 端末の秘密鍵は端末の外に出ない。
+lemma device_sk_secrecy [reuse]:
+  "All did sk #i. DevSk(did, sk) @ #i ==> not (Ex #j. K(sk) @ #j)"
+
+// 正常系: QR コードが漏れずにペアリングし、別の端末が送ったアイテムを受け取れる。
+lemma executable:
+  exists-trace
+  "Ex A B gid sid uk id m #i #j #k.
+     Paired(B, sid, gid, uk) @ #i & Sent(A, gid, id, m) @ #j & Accepted(B, gid, id, m) @ #k
+     & not (A = B)
+     & not (Ex s #x. LeakQR(s) @ #x)"
+
+// 性質 2: ユーザー鍵は攻撃者（サーバーを含む）に漏れない。
+lemma userkey_secrecy [reuse]:
+  "All gid uk #i. GroupCreated(gid, uk) @ #i ==> not (Ex #j. K(uk) @ #j)"
+
+// 性質 4b: 新端末が受け取るユーザー鍵は、QR コードが示すグループの本物の鍵に限られる
+// （サーバーが別の鍵を送り付けても受け入れない）。
+lemma joined_key_is_genuine [reuse]:
+  "All did sid gid uk #i. Paired(did, sid, gid, uk) @ #i
+     ==> (Ex #j. GroupCreated(gid, uk) @ #j & #j < #i)"
+
+// 性質 2: アイテム鍵は攻撃者（サーバーを含む）に漏れない。
+lemma itemkey_secrecy:
+  "All gid id ik #i. ItemKey(gid, id, ik) @ #i ==> not (Ex #j. K(ik) @ #j)"
+
+// 性質 1: 送った内容は攻撃者（サーバーを含む）に読めない。
+lemma item_secrecy:
+  "All D gid id m #i. Sent(D, gid, id, m) @ #i ==> not (Ex #j. K(m) @ #j)"
+
+// 性質 4a: 既存端末が承認する公開鍵は、QR コードを読んだ正規の端末が作ったものに限られる。
+lemma approve_only_scanned_device:
+  "All A sid pkX #i. Approved(A, sid, pkX) @ #i
+     ==> (Ex did #j. JoinReq(did, sid, pkX) @ #j & #j < #i)"
+
+// 確認コードが違う端末を承認するのは、6 桁のコードが偶然一致した場合（Guess）に限られる。
+lemma wrong_approval_needs_collision:
+  "All A sid pkX #i. Approved(A, sid, pkX) @ #i & not (Ex did #j. JoinReq(did, sid, pkX) @ #j)
+     ==> (Ex #g. Guess(sid) @ #g)"
+
+// 性質 3 と 5: 受け入れたアイテムはグループ内の端末が送ったもので、
+// 同じ端末が同じアイテムを二度受け入れない（再送を受け入れない）。
+lemma item_injective_agreement:
+  "All R gid id m #i. Accepted(R, gid, id, m) @ #i
+     ==> (Ex S #j. Sent(S, gid, id, m) @ #j & #j < #i)
+       & not (Ex #i2. Accepted(R, gid, id, m) @ #i2 & not (#i2 = #i))"
+
+end
